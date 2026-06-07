@@ -1,14 +1,25 @@
+import 'dart:io';
+
 import 'package:flutter/material.dart';
 import 'package:get/get.dart';
 import 'package:get_storage/get_storage.dart';
-import 'package:sms_app/app/home/controllers/home_controller.dart';
 import 'package:sms_app/app/initialize/theme_contants.dart';
 import 'package:wakelock_plus/wakelock_plus.dart';
 
 import 'app/home/views/connection_chack_page.dart';
 
+class MyHttpOverrides extends HttpOverrides {
+  @override
+  HttpClient createHttpClient(SecurityContext? context) {
+    return super.createHttpClient(context)
+      ..badCertificateCallback =
+          (X509Certificate cert, String host, int port) => true;
+  }
+}
+
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
+  HttpOverrides.global = MyHttpOverrides();
   await GetStorage.init();
   WakelockPlus.enable();
   runApp(const MyApp());
@@ -22,7 +33,6 @@ class MyApp extends StatefulWidget {
 }
 
 class _MyAppState extends State<MyApp> {
-  final HomeController homeController = Get.put(HomeController());
 
   @override
   Widget build(BuildContext context) {

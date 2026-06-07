@@ -1,5 +1,5 @@
 name: sms_app
-version: 1.0.0+1
+version: 1.0.3+4
 publish_to: none
 description: A new Flutter project.
 environment:
@@ -9,9 +9,7 @@ dependencies:
   cupertino_icons:
   get: ^4.7.2
   get_storage:
-  easy_sms_receiver: ^0.0.2
-  flutter_sms_inbox:
-  permission_handler: ^10.2.0
+  permission_handler: ^12.0.1
   http:
   intl:
   wakelock_plus: ^1.2.10
