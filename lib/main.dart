@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:get/get.dart';
 import 'package:get_storage/get_storage.dart';
 import 'package:sms_app/app/initialize/theme_contants.dart';
+import 'package:sms_app/app/services/app_info_service.dart';
 import 'package:wakelock_plus/wakelock_plus.dart';
 
 import 'app/home/views/connection_chack_page.dart';
@@ -21,6 +22,7 @@ Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
   HttpOverrides.global = MyHttpOverrides();
   await GetStorage.init();
+  await AppInfo.load();
   WakelockPlus.enable();
   runApp(const MyApp());
 }

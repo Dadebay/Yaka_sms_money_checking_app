@@ -6,6 +6,7 @@ import 'package:kartal/kartal.dart';
 import 'package:sms_app/app/initialize/agree_button.dart';
 import 'package:sms_app/app/initialize/color_constants.dart';
 import 'package:sms_app/app/initialize/custom_app_bar.dart';
+import 'package:sms_app/app/services/app_info_service.dart';
 import 'package:sms_app/app/services/sim_service.dart';
 
 import '../controllers/home_controller.dart';
@@ -105,6 +106,7 @@ class _HomeViewState extends State<HomeView> {
     return Scaffold(
       appBar: CustomAppBar(
         title: "SMS страница",
+        subtitle: AppInfo.subtitle,
         showBackButton: false,
         actionButton: Row(
           children: [
@@ -117,12 +119,6 @@ class _HomeViewState extends State<HomeView> {
               onPressed: () => Get.to(() => const SimSettingsView()),
               icon:
                   const Icon(Icons.sim_card, color: ColorConstants.whiteColor),
-            ),
-            IconButton(
-              icon: Obx(() => Text(" ${_controller.smsCount.value}")),
-              onPressed: () {
-                setState(() {});
-              },
             ),
           ],
         ),

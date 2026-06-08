@@ -9,10 +9,18 @@ class CustomAppBar extends StatelessWidget implements PreferredSizeWidget {
   final String title;
   final bool showBackButton;
   final Widget? actionButton;
+  final String? subtitle;
 
-  const CustomAppBar({super.key, required this.title, required this.showBackButton, this.actionButton});
+  const CustomAppBar({super.key, required this.title, required this.showBackButton, this.actionButton, this.subtitle});
+
+  bool get _hasSubtitle => subtitle != null && subtitle!.isNotEmpty;
+
   @override
   Widget build(BuildContext context) {
+    final titleText = Text(
+      title.tr,
+      style: context.general.textTheme.headlineMedium!.copyWith(color: Colors.white, fontSize: 24, fontWeight: FontWeight.bold),
+    );
     return AppBar(
       automaticallyImplyLeading: false,
       backgroundColor: ColorConstants.primaryColor,
@@ -31,10 +39,22 @@ class CustomAppBar extends StatelessWidget implements PreferredSizeWidget {
               ),
             )
           : null,
-      title: Text(
-        title.tr,
-        style: context.general.textTheme.headlineMedium!.copyWith(color: Colors.white, fontSize: 24, fontWeight: FontWeight.bold),
-      ),
+      title: _hasSubtitle
+          ? Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                titleText,
+                Text(
+                  subtitle!,
+                  style: context.general.textTheme.bodySmall!.copyWith(
+                    color: Colors.white70,
+                    fontSize: 11,
+                  ),
+                ),
+              ],
+            )
+          : titleText,
       actions: [
         actionButton ?? const SizedBox.shrink(),
       ],
@@ -42,5 +62,5 @@ class CustomAppBar extends StatelessWidget implements PreferredSizeWidget {
   }
 
   @override
-  Size get preferredSize => const Size.fromHeight(kToolbarHeight);
+  Size get preferredSize => Size.fromHeight(_hasSubtitle ? kToolbarHeight + 16 : kToolbarHeight);
 }

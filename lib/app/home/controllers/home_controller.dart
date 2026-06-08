@@ -2,6 +2,7 @@
 import 'dart:convert';
 import 'dart:io';
 
+import 'package:flutter/foundation.dart' show debugPrint;
 import 'package:get/get.dart';
 import 'package:get_storage/get_storage.dart';
 import 'package:http/http.dart' as http;
@@ -49,7 +50,7 @@ class HomeController extends GetxController {
         }
       }
     } catch (e) {
-      print("⚠️ Could not read active SIMs: $e");
+      debugPrint("⚠️ Could not read active SIMs: $e");
     }
   }
 
@@ -69,8 +70,10 @@ class HomeController extends GetxController {
     required String sender,
     required String amount,
     required String receiver,
+    required String time,
   }) async {
-    print("sender: $sender / receiver: $receiver / amount: $amount");
+    debugPrint(
+        "sender: $sender / receiver: $receiver / amount: $amount / time: $time");
     try {
       final response = await http.post(
         Uri.parse('https://yashelektrik.com/api/v1/transactions'),
@@ -84,17 +87,31 @@ class HomeController extends GetxController {
           'sender': "+$sender",
           'receiver': receiver,
           'amount': amount,
+          'time': time,
           'token': "BYAhDQAAAIOyop/ximLMMwI=",
         }),
       );
 
-      print(response.body);
-      print(response.statusCode);
+      debugPrint(response.body);
+      debugPrint(response.statusCode.toString());
       return response.statusCode;
     } catch (e) {
-      print("❌ Error sending transaction: $e");
+      debugPrint("❌ Error sending transaction: $e");
       return 0;
     }
+  }
+
+  /// Matches a timestamp like `02/06/2026 15:34:12` anywhere in the SMS body.
+  static final RegExp _timeRegExp =
+      RegExp(r'(?<time>\d{2}/\d{2}/\d{4} \d{2}:\d{2}:\d{2})');
+
+  /// Formats epoch millis as `dd/MM/yyyy HH:mm:ss` (fallback when the SMS body
+  /// has no embedded timestamp).
+  String _formatTime(int dateMillis) {
+    final d = DateTime.fromMillisecondsSinceEpoch(dateMillis);
+    String two(int n) => n.toString().padLeft(2, '0');
+    return "${two(d.day)}/${two(d.month)}/${d.year} "
+        "${two(d.hour)}:${two(d.minute)}:${two(d.second)}";
   }
 
   void parseSmsAndAddToList(
@@ -105,24 +122,37 @@ class HomeController extends GetxController {
   ) {
     if (!senderNumber.endsWith(targetNumber)) return;
 
+    // Money: `20.0`, `20,00`, `20.00`, etc. Phone: 11 digits after "Su".
     RegExp regExp1 =
-        RegExp(r'(?<money>\d+,\d{2}|\d+\.\d{2}) manat\. Su (?<phone>\d{11})');
-    RegExp regExp2 = RegExp(
-        r'Sizin hasabynyz (?<money>\d+,\d{2}|\d+\.\d{2}) manat kopeldi.*');
+        RegExp(r'(?<money>\d+[.,]\d{1,2}) manat\. Su (?<phone>\d{11})');
+    RegExp regExp2 =
+        RegExp(r'Sizin hasabynyz (?<money>\d+[.,]\d{1,2}) manat kopeldi.*');
 
     var match1 = regExp1.firstMatch(sms);
     var match2 = regExp2.firstMatch(sms);
+
+    // Prefer the timestamp embedded in the SMS; fall back to the inbox date.
+    String time = _timeRegExp.firstMatch(sms)?.namedGroup('time') ??
+        _formatTime(dateMillis);
 
     if (match1 != null) {
       String phone = match1.namedGroup('phone')!;
       String money = match1.namedGroup('money')!.replaceAll(',', '.');
       addPhoneNumber(
-          phone: phone, dateMillis: dateMillis, money: money, subId: subId);
+          phone: phone,
+          dateMillis: dateMillis,
+          money: money,
+          subId: subId,
+          time: time);
     } else if (match2 != null) {
       String money = match2.namedGroup('money')!.replaceAll(',', '.');
       String phone = "Terminaldan Gecdi";
       addPhoneNumber(
-          phone: phone, dateMillis: dateMillis, money: money, subId: subId);
+          phone: phone,
+          dateMillis: dateMillis,
+          money: money,
+          subId: subId,
+          time: time);
     }
   }
 
@@ -136,6 +166,7 @@ class HomeController extends GetxController {
       sender: item['phone'],
       amount: item['money'],
       receiver: item['receiver'] ?? _fallbackReceiver,
+      time: item['time'] ?? _formatTime(item['dateMillis'] ?? 0),
     );
     item['statusCode'] = status;
     phoneNumberList.refresh();
@@ -146,10 +177,10 @@ class HomeController extends GetxController {
     // Check and request SMS permission before reading
     bool hasPermission = await PermissionService.checkSmsPermission();
     if (!hasPermission) {
-      print("❌ SMS permission not granted. Requesting...");
+      debugPrint("❌ SMS permission not granted. Requesting...");
       hasPermission = await PermissionService.requestSmsPermission();
       if (!hasPermission) {
-        print("❌ Cannot read SMS - permission denied");
+        debugPrint("❌ Cannot read SMS - permission denied");
         return;
       }
     }
@@ -194,6 +225,7 @@ class HomeController extends GetxController {
     required int dateMillis,
     required String money,
     required int subId,
+    required String time,
   }) async {
     // Atomic check-and-reserve: Dart is single-threaded, so as long as we add
     // the (pending) entry before any `await`, a concurrent call (live + fetch)
@@ -211,6 +243,7 @@ class HomeController extends GetxController {
       "dateMillis": dateMillis,
       "subId": subId,
       "receiver": receiver,
+      "time": time,
       "statusCode": 0, // pending
     };
     phoneNumberList.add(entry);
@@ -220,6 +253,7 @@ class HomeController extends GetxController {
       sender: phone,
       amount: money,
       receiver: receiver,
+      time: time,
     );
     entry["statusCode"] = status;
     phoneNumberList.refresh();

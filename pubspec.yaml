@@ -1,5 +1,5 @@
 name: sms_app
-version: 1.0.3+4
+version: 1.0.4+5
 publish_to: none
 description: A new Flutter project.
 environment:
@@ -15,6 +15,7 @@ dependencies:
   wakelock_plus: ^1.2.10
   kartal:
   flutter_iconly:
+  package_info_plus: ^8.1.2
 
   flutter:
     sdk: flutter
