@@ -3,7 +3,6 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:get/get.dart';
 import 'package:kartal/kartal.dart';
-import 'package:sms_app/app/initialize/agree_button.dart';
 import 'package:sms_app/app/initialize/color_constants.dart';
 import 'package:sms_app/app/initialize/custom_app_bar.dart';
 import 'package:sms_app/app/services/app_info_service.dart';
@@ -11,6 +10,7 @@ import 'package:sms_app/app/services/sim_service.dart';
 
 import '../controllers/home_controller.dart';
 import 'sim_settings_view.dart';
+import 'transaction_log_view.dart';
 
 class HomeView extends StatefulWidget {
   const HomeView({super.key});
@@ -19,20 +19,35 @@ class HomeView extends StatefulWidget {
   State<HomeView> createState() => _HomeViewState();
 }
 
-class _HomeViewState extends State<HomeView> {
+class _HomeViewState extends State<HomeView>
+    with SingleTickerProviderStateMixin {
   final HomeController _controller = Get.put(HomeController());
   final String targetNumber = "0801";
   StreamSubscription<IncomingSms>? _smsSubscription;
 
+  /// Fills 0->1 over one cycle period as a countdown to the next sync; reset
+  /// each time a sync finishes so it stays aligned with the real cycle.
+  late final AnimationController _cycleAnim;
+  Worker? _syncWorker;
+
   @override
   void initState() {
     super.initState();
+    _cycleAnim = AnimationController(
+      vsync: this,
+      duration: const Duration(minutes: 1),
+    )..forward();
+    _syncWorker = ever(_controller.isSyncing, (bool syncing) {
+      if (!syncing) _cycleAnim.forward(from: 0);
+    });
     listenForSms();
   }
 
   @override
   void dispose() {
     _smsSubscription?.cancel();
+    _syncWorker?.dispose();
+    _cycleAnim.dispose();
     super.dispose();
   }
 
@@ -101,6 +116,20 @@ class _HomeViewState extends State<HomeView> {
     );
   }
 
+  void confirmFetchSms() {
+    Get.defaultDialog(
+      title: "Получить SMS",
+      middleText: "Вы действительно хотите получить SMS заново?",
+      textConfirm: "Да",
+      textCancel: "Нет",
+      confirmTextColor: Colors.white,
+      onConfirm: () {
+        Get.back();
+        _controller.fetchSmsFrom0801();
+      },
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -120,15 +149,41 @@ class _HomeViewState extends State<HomeView> {
               icon:
                   const Icon(Icons.sim_card, color: ColorConstants.whiteColor),
             ),
+            IconButton(
+              onPressed: () => Get.to(() => const TransactionLogView()),
+              tooltip: "Журнал ошибок",
+              icon: const Icon(Icons.receipt_long,
+                  color: ColorConstants.whiteColor),
+            ),
+            IconButton(
+              onPressed: confirmFetchSms,
+              tooltip: "Получить SMS",
+              icon: const Icon(Icons.download_rounded,
+                  color: ColorConstants.whiteColor),
+            ),
           ],
         ),
-      ),
-      floatingActionButtonLocation: FloatingActionButtonLocation.centerFloat,
-      floatingActionButton: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 10),
-        child: AgreeButton(
-          onTap: _controller.fetchSmsFrom0801,
-          text: "Получить SMS",
+        bottom: PreferredSize(
+          preferredSize: const Size.fromHeight(4),
+          child: Obx(
+            () => _controller.isSyncing.value
+                // Active sync: indeterminate animated bar.
+                ? const LinearProgressIndicator(
+                    minHeight: 4,
+                    backgroundColor: Colors.white24,
+                    valueColor: AlwaysStoppedAnimation(Colors.white),
+                  )
+                // Idle: countdown bar filling toward the next cycle.
+                : AnimatedBuilder(
+                    animation: _cycleAnim,
+                    builder: (_, __) => LinearProgressIndicator(
+                      value: _cycleAnim.value,
+                      minHeight: 4,
+                      backgroundColor: Colors.white24,
+                      valueColor: const AlwaysStoppedAnimation(Colors.white70),
+                    ),
+                  ),
+          ),
         ),
       ),
       body: Obx(() {
@@ -194,11 +249,14 @@ class _HomeViewState extends State<HomeView> {
                                         .copyWith(
                                             color: ColorConstants.greyColor))),
                             if (isPending)
-                              const SizedBox(
-                                width: 20,
-                                height: 20,
-                                child: CircularProgressIndicator(
-                                    strokeWidth: 2, color: Colors.orange),
+                              IconButton(
+                                onPressed: () => _controller.retrySmsPost(item),
+                                icon: const SizedBox(
+                                  width: 20,
+                                  height: 20,
+                                  child: CircularProgressIndicator(
+                                      strokeWidth: 2, color: Colors.orange),
+                                ),
                               )
                             else if (!isSuccess)
                               IconButton(

@@ -10,8 +10,9 @@ class CustomAppBar extends StatelessWidget implements PreferredSizeWidget {
   final bool showBackButton;
   final Widget? actionButton;
   final String? subtitle;
+  final PreferredSizeWidget? bottom;
 
-  const CustomAppBar({super.key, required this.title, required this.showBackButton, this.actionButton, this.subtitle});
+  const CustomAppBar({super.key, required this.title, required this.showBackButton, this.actionButton, this.subtitle, this.bottom});
 
   bool get _hasSubtitle => subtitle != null && subtitle!.isNotEmpty;
 
@@ -58,9 +59,10 @@ class CustomAppBar extends StatelessWidget implements PreferredSizeWidget {
       actions: [
         actionButton ?? const SizedBox.shrink(),
       ],
+      bottom: bottom,
     );
   }
 
   @override
-  Size get preferredSize => Size.fromHeight(_hasSubtitle ? kToolbarHeight + 16 : kToolbarHeight);
+  Size get preferredSize => Size.fromHeight((_hasSubtitle ? kToolbarHeight + 16 : kToolbarHeight) + (bottom?.preferredSize.height ?? 0));
 }
