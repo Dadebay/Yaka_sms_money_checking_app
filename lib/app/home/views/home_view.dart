@@ -19,8 +19,7 @@ class HomeView extends StatefulWidget {
   State<HomeView> createState() => _HomeViewState();
 }
 
-class _HomeViewState extends State<HomeView>
-    with SingleTickerProviderStateMixin {
+class _HomeViewState extends State<HomeView> with SingleTickerProviderStateMixin {
   final HomeController _controller = Get.put(HomeController());
   final String targetNumber = "0801";
   StreamSubscription<IncomingSms>? _smsSubscription;
@@ -53,22 +52,19 @@ class _HomeViewState extends State<HomeView>
 
   void listenForSms() {
     _smsSubscription = _controller.simService.incomingSms().listen((message) {
-      if (message.address.endsWith(targetNumber)) {
-        print('new message ${message.body}');
-        _controller.parseSmsAndAddToList(
+      if (message.address.trim().endsWith(targetNumber)) {
+        unawaited(_controller.parseSmsAndAddToList(
           message.body,
           message.dateMillis,
           message.address,
           message.subId,
-        );
+        ));
       }
     });
   }
 
   String _formatDate(dynamic dateMillis) {
-    final int millis = (dateMillis is int)
-        ? dateMillis
-        : int.tryParse(dateMillis?.toString() ?? '') ?? 0;
+    final int millis = (dateMillis is int) ? dateMillis : int.tryParse(dateMillis?.toString() ?? '') ?? 0;
     if (millis == 0) return '';
     final dt = DateTime.fromMillisecondsSinceEpoch(millis);
     String two(int v) => v.toString().padLeft(2, '0');
@@ -119,13 +115,24 @@ class _HomeViewState extends State<HomeView>
   void confirmFetchSms() {
     Get.defaultDialog(
       title: "Получить SMS",
-      middleText: "Вы действительно хотите получить SMS заново?",
+      middleText: "Платёжные SMS от 0801, полученные после первой установки приложения, будут добавлены и отправлены на сервер. Продолжить?",
       textConfirm: "Да",
       textCancel: "Нет",
       confirmTextColor: Colors.white,
-      onConfirm: () {
+      onConfirm: () async {
         Get.back();
-        _controller.fetchSmsFrom0801();
+        try {
+          final imported = await _controller.fetchSmsFrom0801();
+          if (!mounted) return;
+          Get.snackbar(
+            'Проверка SMS',
+            'Найдено: ${_controller.smsCount.value}, добавлено: $imported',
+            snackPosition: SnackPosition.BOTTOM,
+          );
+        } catch (e) {
+          if (!mounted) return;
+          Get.snackbar('Ошибка чтения SMS', e.toString(), snackPosition: SnackPosition.BOTTOM);
+        }
       },
     );
   }
@@ -141,25 +148,22 @@ class _HomeViewState extends State<HomeView>
           children: [
             IconButton(
               onPressed: showStatusLegendDialog,
-              icon: const Icon(Icons.info_outline,
-                  color: ColorConstants.whiteColor),
+              icon: const Icon(Icons.info_outline, color: ColorConstants.whiteColor),
             ),
             IconButton(
               onPressed: () => Get.to(() => const SimSettingsView()),
-              icon:
-                  const Icon(Icons.sim_card, color: ColorConstants.whiteColor),
+              tooltip: 'Настройки оплаты',
+              icon: const Icon(Icons.settings_outlined, color: ColorConstants.whiteColor),
             ),
             IconButton(
               onPressed: () => Get.to(() => const TransactionLogView()),
               tooltip: "Журнал ошибок",
-              icon: const Icon(Icons.receipt_long,
-                  color: ColorConstants.whiteColor),
+              icon: const Icon(Icons.receipt_long, color: ColorConstants.whiteColor),
             ),
             IconButton(
               onPressed: confirmFetchSms,
               tooltip: "Получить SMS",
-              icon: const Icon(Icons.download_rounded,
-                  color: ColorConstants.whiteColor),
+              icon: const Icon(Icons.download_rounded, color: ColorConstants.whiteColor),
             ),
           ],
         ),
@@ -189,29 +193,26 @@ class _HomeViewState extends State<HomeView>
       body: Obx(() {
         if (_controller.phoneNumberList.isEmpty) {
           return Center(
-            child: Text("Нет SMS",
-                style: context.general.textTheme.titleLarge!
-                    .copyWith(fontWeight: FontWeight.bold)),
+            child: Text("Нет SMS", style: context.general.textTheme.titleLarge!.copyWith(fontWeight: FontWeight.bold)),
           );
         }
         return Align(
           alignment: Alignment.topCenter,
           child: ListView.builder(
-            padding:
-                const EdgeInsets.only(top: 20, right: 20, left: 20, bottom: 80),
+            padding: const EdgeInsets.only(top: 20, right: 20, left: 20, bottom: 80),
             itemCount: _controller.phoneNumberList.length,
             reverse: true,
             shrinkWrap: true,
             itemBuilder: (context, index) {
               final item = _controller.phoneNumberList[index];
               final int statusCode = item["statusCode"] ?? 0;
-              final bool isSuccess = statusCode == 200 || statusCode == 201;
+              final bool isSuccess = statusCode >= 200 && statusCode < 300;
               final bool isPending = statusCode == 0;
               final Color backgroundColor = isSuccess
-                  ? Colors.green.withOpacity(0.1)
+                  ? Colors.green.withValues(alpha: 0.1)
                   : isPending
-                      ? Colors.orange.withOpacity(0.1)
-                      : Colors.red.withOpacity(0.1);
+                      ? Colors.orange.withValues(alpha: 0.1)
+                      : Colors.red.withValues(alpha: 0.1);
 
               return Container(
                 margin: context.padding.onlyTopNormal,
@@ -221,47 +222,30 @@ class _HomeViewState extends State<HomeView>
                 ),
                 child: Row(
                   children: [
-                    Text("  ${index + 1}",
-                        style: context.general.textTheme.bodyLarge!.copyWith(
-                            fontWeight: FontWeight.bold, fontSize: 18)),
+                    Text("  ${index + 1}", style: context.general.textTheme.bodyLarge!.copyWith(fontWeight: FontWeight.bold, fontSize: 18)),
                     Expanded(
                       child: ListTile(
                         title: Row(
                           children: [
-                            Expanded(
-                                child: Text("+${item["phone"]}",
-                                    style: context.general.textTheme.bodyLarge!
-                                        .copyWith(
-                                            fontWeight: FontWeight.bold,
-                                            fontSize: 18))),
-                            Text("${item["money"]} м",
-                                style: context.general.textTheme.bodyLarge!
-                                    .copyWith(
-                                        fontWeight: FontWeight.bold,
-                                        fontSize: 18)),
+                            Expanded(child: Text("+${item["phone"]}", style: context.general.textTheme.bodyLarge!.copyWith(fontWeight: FontWeight.bold, fontSize: 18))),
+                            Text("${item["money"]} м", style: context.general.textTheme.bodyLarge!.copyWith(fontWeight: FontWeight.bold, fontSize: 18)),
                           ],
                         ),
                         subtitle: Row(
                           children: [
-                            Expanded(
-                                child: Text(_formatDate(item["dateMillis"]),
-                                    style: context.general.textTheme.bodyLarge!
-                                        .copyWith(
-                                            color: ColorConstants.greyColor))),
+                            Expanded(child: Text(_formatDate(item["dateMillis"]), style: context.general.textTheme.bodyLarge!.copyWith(color: ColorConstants.greyColor))),
                             if (isPending)
                               IconButton(
                                 onPressed: () => _controller.retrySmsPost(item),
                                 icon: const SizedBox(
                                   width: 20,
                                   height: 20,
-                                  child: CircularProgressIndicator(
-                                      strokeWidth: 2, color: Colors.orange),
+                                  child: CircularProgressIndicator(strokeWidth: 2, color: Colors.orange),
                                 ),
                               )
                             else if (!isSuccess)
                               IconButton(
-                                icon: const Icon(Icons.refresh,
-                                    color: Colors.red),
+                                icon: const Icon(Icons.refresh, color: Colors.red),
                                 onPressed: () => _controller.retrySmsPost(item),
                               ),
                           ],

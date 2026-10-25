@@ -1,6 +1,6 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:tools="http://schemas.android.com/tools"
-    package="com.example.sms_app">
+    package="com.yaka.smschecker">
     <!-- Network Permissions -->
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.ACCESS_WIFI_STATE" />
@@ -26,7 +26,7 @@
     <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE" 
         tools:ignore="ScopedStorage" />
    <application
-        android:label="SMS programma"
+        android:label="KOMEKCI SMS"
         android:usesCleartextTraffic="false"
         android:name="${applicationName}"
         android:requestLegacyExternalStorage="true"

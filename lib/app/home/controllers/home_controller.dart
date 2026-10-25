@@ -1,30 +1,62 @@
 // 📄 HomeController - home_controller.dart
 import 'dart:async';
 import 'dart:convert';
-import 'dart:io';
 
 import 'package:flutter/foundation.dart' show debugPrint;
 import 'package:get/get.dart';
 import 'package:get_storage/get_storage.dart';
-import 'package:http/http.dart' as http;
 import 'package:sms_app/app/services/permission_service.dart';
-import 'package:sms_app/app/services/sim_number_store.dart';
+import 'package:sms_app/app/services/payment_api_service.dart';
+import 'package:sms_app/app/services/payment_token_store.dart';
 import 'package:sms_app/app/services/sim_service.dart';
 import 'package:sms_app/app/services/transaction_log_store.dart';
 
 class HomeController extends GetxController {
+  HomeController({PaymentApiService? paymentApi})
+      : paymentApi = paymentApi ?? PaymentApiService();
+
+  static const _historyCutoffKey = 'komekciHistoryStartedAtMillisV1';
+  static const _legacyHistoryKey = 'phoneNumberListBeforeKomekciV1';
+
+  /// Establish the first-run cutoff and discard payments imported from older
+  /// inbox messages by previous releases. Removed payments must not be retried.
+  static Future<void> prepareHistory() async {
+    final storage = GetStorage();
+    final existingCutoff = storage.read<int>(_historyCutoffKey);
+    final cutoff = existingCutoff ?? DateTime.now().millisecondsSinceEpoch;
+    final raw = storage.read<String>('phoneNumberList') ?? '[]';
+    final entries = List<Map<String, dynamic>>.from(jsonDecode(raw));
+    if (existingCutoff == null) {
+      TransactionLogStore().removeForTransactions(entries);
+      await storage.write(_historyCutoffKey, cutoff);
+      await storage.write('phoneNumberList', '[]');
+    } else {
+      final current = entries.where((item) {
+        final date = item['dateMillis'];
+        return date is int &&
+            date >= cutoff &&
+            item['importedManually'] != true;
+      }).toList();
+      if (current.length != entries.length) {
+        TransactionLogStore().removeForTransactions(
+          entries.where((item) => !current.contains(item)),
+        );
+        await storage.write('phoneNumberList', jsonEncode(current));
+      }
+    }
+    await storage.remove(_legacyHistoryKey);
+  }
+
   final storage = GetStorage();
   final SimService simService = SimService();
-  final SimNumberStore simNumberStore = SimNumberStore();
   final TransactionLogStore transactionLogStore = TransactionLogStore();
+  final PaymentApiService paymentApi;
+  final PaymentTokenStore paymentTokenStore = PaymentTokenStore();
 
   RxList phoneNumberList = [].obs;
   RxBool agreeButton = false.obs;
   final String targetNumber = "0801";
   RxInt smsCount = 0.obs;
-
-  /// Fallback receiver when a SIM number can't be resolved.
-  static const String _fallbackReceiver = "+99364030911";
 
   /// Window (ms) within which two messages with the same payer/amount/SIM are
   /// treated as the same physical SMS. Tolerates the small skew between the
@@ -32,8 +64,14 @@ class HomeController extends GetxController {
   /// allowing genuine repeats that are minutes apart.
   static const int _dedupWindowMillis = 5000;
 
-  /// Cache of subId -> active SIM number, refreshed from the device.
-  final Map<int, String> _simNumbers = {};
+  late final int _monitoringStartedAtMillis;
+
+  bool _isCurrentEntry(Map item) {
+    final date = item['dateMillis'];
+    return date is int &&
+        date >= _monitoringStartedAtMillis &&
+        item['importedManually'] != true;
+  }
 
   /// Periodic timer driving [runSyncCycle]; null until [_startAutoSync] runs.
   Timer? _cycleTimer;
@@ -45,14 +83,17 @@ class HomeController extends GetxController {
   @override
   void onInit() {
     super.onInit();
+    _monitoringStartedAtMillis = storage.read<int>(_historyCutoffKey) ??
+        DateTime.now().millisecondsSinceEpoch;
     getPhoneNumbersList();
-    refreshSimNumbers();
     _startAutoSync();
+    unawaited(runSyncCycle());
   }
 
   @override
   void onClose() {
     _cycleTimer?.cancel();
+    paymentApi.close();
     super.onClose();
   }
 
@@ -71,67 +112,59 @@ class HomeController extends GetxController {
     try {
       await _fetchInboxSilently();
       await retryFailedTransactions();
+    } catch (e) {
+      debugPrint('❌ SMS sync failed: $e');
     } finally {
       isSyncing.value = false;
     }
   }
 
-  /// Loads carrier-provisioned numbers for active SIMs (best effort).
-  Future<void> refreshSimNumbers() async {
-    try {
-      final sims = await simService.getActiveSims();
-      _simNumbers.clear();
-      for (final sim in sims) {
-        if (sim.number.trim().isNotEmpty) {
-          _simNumbers[sim.subId] = sim.number.trim();
-        }
-      }
-    } catch (e) {
-      debugPrint("⚠️ Could not read active SIMs: $e");
-    }
-  }
-
-  /// Resolves the receiver number for the SIM that received the SMS:
-  /// carrier number (auto) -> manual mapping -> hardcoded fallback.
-  String resolveReceiver(int subId) {
-    final auto = _simNumbers[subId];
-    if (auto != null && auto.isNotEmpty) return auto;
-
-    final manual = simNumberStore.numberFor(subId);
-    if (manual != null && manual.isNotEmpty) return manual;
-
-    return _fallbackReceiver;
-  }
-
   Future<int> sendTransactionSMS({
     required String sender,
     required String amount,
-    required String receiver,
     required String time,
   }) async {
-    debugPrint(
-        "sender: $sender / receiver: $receiver / amount: $amount / time: $time");
+    // The receiver comes from the payment backend, not from the device's SIM.
+    // If that lookup fails, avoid sending money to a stale fallback number.
+    late final String receiver;
+    try {
+      receiver = await paymentApi.fetchReceiver();
+    } catch (e) {
+      transactionLogStore.add(
+        statusCode: 503,
+        requestBody: {'sender': sender, 'amount': amount, 'time': time},
+        requestHeaders: const {'Accept': 'application/json'},
+        responseMessage: 'GET /api/phone: $e',
+      );
+      return 503;
+    }
 
-    final headers = <String, String>{
-      HttpHeaders.acceptHeader: 'application/json',
-      HttpHeaders.contentTypeHeader: 'application/json; charset=UTF-8',
-      HttpHeaders.authorizationHeader:
-          'Bearer cAzP4oPFBBhS0oPUboKZRLD6Eh2ShWeEt4X2po67muTNUWLXhgbYZ3TfHx25',
-    };
-    final requestBody = <String, dynamic>{
-      'sender': "+$sender",
-      'receiver': receiver,
-      'amount': amount,
-      'time': time,
-      'token': "BYAhDQAAAIOyop/ximLMMwI=",
-    };
+    late final Map<String, dynamic> requestBody;
+    try {
+      requestBody = PaymentApiService.requestBody(
+        sender: sender,
+        receiver: receiver,
+        amount: amount,
+        time: time,
+        token: paymentTokenStore.token,
+      );
+    } on FormatException catch (e) {
+      transactionLogStore.add(
+        statusCode: 400,
+        requestBody: {
+          'sender': sender,
+          'receiver': receiver,
+          'amount': amount,
+          'time': time
+        },
+        requestHeaders: PaymentApiService.transactionHeaders,
+        responseMessage: e.message,
+      );
+      return 400;
+    }
 
     try {
-      final response = await http.post(
-        Uri.parse('https://yashelektrik.com/api/v1/transactions'),
-        headers: headers,
-        body: jsonEncode(requestBody),
-      );
+      final response = await paymentApi.postTransaction(requestBody);
 
       debugPrint(response.body);
       debugPrint(response.statusCode.toString());
@@ -142,23 +175,23 @@ class HomeController extends GetxController {
         transactionLogStore.add(
           statusCode: response.statusCode,
           requestBody: requestBody,
-          requestHeaders: headers,
+          requestHeaders: PaymentApiService.transactionHeaders,
           responseMessage: response.body,
         );
       }
       return response.statusCode;
     } catch (e) {
       debugPrint("❌ Error sending transaction: $e");
-      // Network/exception failure: no HTTP status, so record a synthetic 400
-      // alongside the error text.
+      // The POST may have reached the server. Keep it pending so the minute
+      // timer cannot automatically submit the same payment a second time.
       transactionLogStore.add(
-        statusCode: 400,
+        statusCode: 0,
         requestBody: requestBody,
-        requestHeaders: headers,
+        requestHeaders: PaymentApiService.transactionHeaders,
         responseMessage: e.toString(),
         error: e.toString(),
       );
-      return 400;
+      return 0;
     }
   }
 
@@ -175,13 +208,16 @@ class HomeController extends GetxController {
         "${two(d.hour)}:${two(d.minute)}:${two(d.second)}";
   }
 
-  void parseSmsAndAddToList(
+  Future<bool> parseSmsAndAddToList(
     String sms,
     int dateMillis,
     String senderNumber,
     int subId,
-  ) {
-    if (!senderNumber.endsWith(targetNumber)) return;
+  ) async {
+    if (!senderNumber.trim().endsWith(targetNumber)) return false;
+    if (dateMillis < _monitoringStartedAtMillis) {
+      return false;
+    }
 
     // Money: `20.0`, `20,00`, `20.00`, etc. Phone: 11 digits after "Su".
     RegExp regExp1 =
@@ -199,7 +235,7 @@ class HomeController extends GetxController {
     if (match1 != null) {
       String phone = match1.namedGroup('phone')!;
       String money = match1.namedGroup('money')!.replaceAll(',', '.');
-      addPhoneNumber(
+      return addPhoneNumber(
           phone: phone,
           dateMillis: dateMillis,
           money: money,
@@ -209,7 +245,7 @@ class HomeController extends GetxController {
     } else if (match2 != null) {
       String money = match2.namedGroup('money')!.replaceAll(',', '.');
       String phone = "Terminaldan Gecdi";
-      addPhoneNumber(
+      return addPhoneNumber(
           phone: phone,
           dateMillis: dateMillis,
           money: money,
@@ -217,6 +253,7 @@ class HomeController extends GetxController {
           time: time,
           body: sms);
     }
+    return false;
   }
 
   void clearSmsList() {
@@ -225,10 +262,10 @@ class HomeController extends GetxController {
   }
 
   void retrySmsPost(Map<String, dynamic> item) async {
+    if (!_isCurrentEntry(item)) return;
     final int status = await sendTransactionSMS(
       sender: item['phone'],
       amount: item['money'],
-      receiver: item['receiver'] ?? _fallbackReceiver,
       time: item['time'] ?? _formatTime(item['dateMillis'] ?? 0),
     );
     item['statusCode'] = status;
@@ -236,7 +273,7 @@ class HomeController extends GetxController {
     storage.write("phoneNumberList", jsonEncode(phoneNumberList));
   }
 
-  Future<void> fetchSmsFrom0801() async {
+  Future<int> fetchSmsFrom0801() async {
     // Check and request SMS permission before reading
     bool hasPermission = await PermissionService.checkSmsPermission();
     if (!hasPermission) {
@@ -244,11 +281,18 @@ class HomeController extends GetxController {
       hasPermission = await PermissionService.requestSmsPermission();
       if (!hasPermission) {
         debugPrint("❌ Cannot read SMS - permission denied");
-        return;
+        throw StateError('SMS okuma izni verilmedi');
       }
     }
-
-    await _fetchInbox();
+    if (isSyncing.value) {
+      throw StateError('SMS senkronizasyonu sürüyor; birazdan tekrar deneyin');
+    }
+    isSyncing.value = true;
+    try {
+      return await _fetchInbox();
+    } finally {
+      isSyncing.value = false;
+    }
   }
 
   /// Inbox sweep for the auto-sync cycle. Only *checks* permission (never
@@ -259,35 +303,40 @@ class HomeController extends GetxController {
     await _fetchInbox();
   }
 
-  /// Reads all SMS from [targetNumber] and parses each. Dedup in
-  /// [addPhoneNumber] ensures already-recorded messages are not re-sent.
-  Future<void> _fetchInbox() async {
-    await refreshSimNumbers();
-
+  /// Reads SMS from [targetNumber] received since the first-run cutoff. Dedup
+  /// in [addPhoneNumber] ensures already-recorded messages are not re-sent.
+  Future<int> _fetchInbox() async {
     final List<InboxSms> messages = await simService.queryInbox(targetNumber);
-    smsCount.value = messages.length;
+    smsCount.value = messages
+        .where((sms) => sms.dateMillis >= _monitoringStartedAtMillis)
+        .length;
+    var imported = 0;
     for (final element in messages) {
-      parseSmsAndAddToList(
+      if (element.dateMillis < _monitoringStartedAtMillis) continue;
+      if (await parseSmsAndAddToList(
         element.body,
         element.dateMillis,
         element.address,
         element.subId,
-      );
+      )) {
+        imported++;
+      }
     }
+    return imported;
   }
 
   /// Re-sends transactions that definitively failed (any status other than
-  /// pending `0` or success `200`/`201`). Skipping `0` avoids double-charging
+  /// pending `0` or a 2xx success). Skipping `0` avoids double-charging
   /// in-flight or timed-out requests that may have actually landed.
   Future<void> retryFailedTransactions() async {
     bool changed = false;
     for (final item in List<Map<String, dynamic>>.from(phoneNumberList)) {
+      if (!_isCurrentEntry(item)) continue;
       final int code = (item['statusCode'] ?? 0) as int;
-      if (code == 0 || code == 200 || code == 201) continue;
+      if (code == 0 || (code >= 200 && code < 300)) continue;
       final int status = await sendTransactionSMS(
         sender: item['phone'],
         amount: item['money'],
-        receiver: item['receiver'] ?? _fallbackReceiver,
         time: item['time'] ?? _formatTime(item['dateMillis'] ?? 0),
       );
       item['statusCode'] = status;
@@ -301,16 +350,17 @@ class HomeController extends GetxController {
 
   void getPhoneNumbersList() {
     final result = storage.read('phoneNumberList') ?? "[]";
-    phoneNumberList.value = List<Map<String, dynamic>>.from(jsonDecode(result));
+    phoneNumberList.value = List<Map<String, dynamic>>.from(jsonDecode(result))
+        .where(_isCurrentEntry)
+        .toList();
   }
 
   /// True if an existing entry represents the same physical SMS.
   ///
-  /// Primary key is the SMS [body] + [subId]: the body text is identical
+  /// Primary key is the SMS [body]: the body text is identical
   /// whether the message was captured via the live broadcast or re-read from
-  /// the inbox sweep, and on every cycle, so the same physical SMS can never be
-  /// recorded twice. The body also embeds the transaction's own timestamp, so
-  /// genuinely distinct payments still differ.
+  /// the inbox sweep, even when a provider omits the subscription id. The
+  /// body also embeds the transaction timestamp, so distinct payments differ.
   ///
   /// Legacy fallback: entries recorded before the `body` field existed are
   /// matched by phone + amount + SIM within [_dedupWindowMillis] of [dateMillis]
@@ -325,21 +375,21 @@ class HomeController extends GetxController {
   }) {
     final String key = body.trim();
     return phoneNumberList.any((e) {
-      if ((e["subId"] ?? -1) != subId) return false;
-
       final String? existingBody = e["body"] as String?;
       if (existingBody != null) {
         return existingBody.trim() == key;
       }
 
       // Legacy entry without a stored body.
+      final oldSubId = (e["subId"] ?? -1) as int;
+      if (oldSubId >= 0 && subId >= 0 && oldSubId != subId) return false;
       if (e["phone"] != phone || e["money"] != money) return false;
       final int existing = (e["dateMillis"] ?? 0) as int;
       return (existing - dateMillis).abs() < _dedupWindowMillis;
     });
   }
 
-  Future<void> addPhoneNumber({
+  Future<bool> addPhoneNumber({
     required String phone,
     required int dateMillis,
     required String money,
@@ -347,6 +397,9 @@ class HomeController extends GetxController {
     required String time,
     required String body,
   }) async {
+    if (dateMillis < _monitoringStartedAtMillis) {
+      return false;
+    }
     // Atomic check-and-reserve: Dart is single-threaded, so as long as we add
     // the (pending) entry before any `await`, a concurrent call (live + fetch)
     // sees it and bails — guaranteeing the transaction is POSTed only once.
@@ -356,17 +409,15 @@ class HomeController extends GetxController {
         subId: subId,
         dateMillis: dateMillis,
         body: body)) {
-      return;
+      return false;
     }
 
-    final String receiver = resolveReceiver(subId);
     final entry = <String, dynamic>{
       "id": "$subId-$phone-$money-$dateMillis",
       "phone": phone,
       "money": money,
       "dateMillis": dateMillis,
       "subId": subId,
-      "receiver": receiver,
       "time": time,
       "body": body.trim(),
       "statusCode": 0, // pending
@@ -377,11 +428,11 @@ class HomeController extends GetxController {
     final int status = await sendTransactionSMS(
       sender: phone,
       amount: money,
-      receiver: receiver,
       time: time,
     );
     entry["statusCode"] = status;
     phoneNumberList.refresh();
     storage.write("phoneNumberList", jsonEncode(phoneNumberList));
+    return true;
   }
 }

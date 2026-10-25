@@ -24,17 +24,31 @@ class TransactionLogStore {
   /// All recorded failures, newest first.
   List<Map<String, dynamic>> read() {
     final raw = _storage.read(_key);
+    List<Map<String, dynamic>> logs;
     if (raw is String && raw.isNotEmpty) {
       try {
-        return List<Map<String, dynamic>>.from(jsonDecode(raw));
+        logs = List<Map<String, dynamic>>.from(jsonDecode(raw));
       } catch (_) {
         return [];
       }
+    } else if (raw is List) {
+      logs = List<Map<String, dynamic>>.from(raw);
+    } else {
+      return [];
     }
-    if (raw is List) {
-      return List<Map<String, dynamic>>.from(raw);
+
+    // Older releases stored the body token in plain text. Mask those entries
+    // when read and rewrite the sanitized log so copies no longer expose it.
+    var changed = false;
+    for (final entry in logs) {
+      final body = entry['requestBody'];
+      if (body is Map && body['token'] != null && body['token'] != '***') {
+        entry['requestBody'] = {...body, 'token': '***'};
+        changed = true;
+      }
     }
-    return [];
+    if (changed) _storage.write(_key, jsonEncode(logs));
+    return logs;
   }
 
   /// Records one failed transaction request.
@@ -52,7 +66,10 @@ class TransactionLogStore {
     final entry = <String, dynamic>{
       'timestamp': DateTime.now().toIso8601String(),
       'statusCode': statusCode,
-      'requestBody': requestBody,
+      'requestBody': {
+        ...requestBody,
+        if (requestBody.containsKey('token')) 'token': '***',
+      },
       'requestHeaders': _maskHeaders(requestHeaders),
       'responseMessage': responseMessage,
       if (error != null) 'error': error,
@@ -68,6 +85,32 @@ class TransactionLogStore {
 
   /// Removes all recorded failures.
   void clear() => _storage.write(_key, jsonEncode([]));
+
+  /// Removes failure logs belonging to payments purged from local history.
+  /// Match all three fields so another payment from the same sender is kept.
+  void removeForTransactions(Iterable<Map<String, dynamic>> transactions) {
+    final keys = transactions.map(_transactionKey).whereType<String>().toSet();
+    if (keys.isEmpty) return;
+    final logs = read();
+    final retained = logs.where((entry) {
+      final body = entry['requestBody'];
+      return body is! Map || !keys.contains(_transactionKey(body));
+    }).toList();
+    if (retained.length != logs.length) {
+      _storage.write(_key, jsonEncode(retained));
+    }
+  }
+
+  String? _transactionKey(Map item) {
+    final sender = (item['sender'] ?? item['phone'])?.toString().trim();
+    final amount = item['amount']?.toString() ?? item['money']?.toString();
+    final time = item['time']?.toString();
+    if (sender == null || sender.isEmpty || amount == null || time == null) {
+      return null;
+    }
+    final normalizedSender = sender.startsWith('+') ? sender.substring(1) : sender;
+    return '$normalizedSender|$amount|$time';
+  }
 
   /// Returns a copy of [headers] with sensitive values replaced by `***`.
   Map<String, String> _maskHeaders(Map<String, String> headers) {

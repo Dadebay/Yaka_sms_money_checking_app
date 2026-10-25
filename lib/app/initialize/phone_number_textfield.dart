@@ -48,7 +48,7 @@ class PhoneNumberTextField extends StatelessWidget {
             padding: const EdgeInsets.only(left: 15),
             child: Text(
               '+ 993',
-              style: context.general.textTheme.titleLarge!.copyWith(color: ColorConstants.greyColor.withOpacity(.5), fontWeight: FontWeight.w500),
+              style: context.general.textTheme.titleLarge!.copyWith(color: ColorConstants.greyColor.withValues(alpha: .5), fontWeight: FontWeight.w500),
             ),
           ),
           contentPadding: context.padding.normal,
@@ -56,14 +56,14 @@ class PhoneNumberTextField extends StatelessWidget {
           hintText: '65 656565 ',
           fillColor: ColorConstants.primaryColor,
           alignLabelWithHint: true,
-          hintStyle: context.general.textTheme.titleLarge!.copyWith(color: ColorConstants.greyColor.withOpacity(.5), fontWeight: FontWeight.w500),
+          hintStyle: context.general.textTheme.titleLarge!.copyWith(color: ColorConstants.greyColor.withValues(alpha: .5), fontWeight: FontWeight.w500),
           border: OutlineInputBorder(
             borderRadius: context.border.normalBorderRadius,
             borderSide: const BorderSide(color: ColorConstants.greyColor, width: 2),
           ),
           enabledBorder: OutlineInputBorder(
             borderRadius: context.border.normalBorderRadius,
-            borderSide: BorderSide(color: ColorConstants.greyColor.withOpacity(.3), width: 2),
+            borderSide: BorderSide(color: ColorConstants.greyColor.withValues(alpha: .3), width: 2),
           ),
           focusedBorder: OutlineInputBorder(
             borderRadius: context.border.normalBorderRadius,

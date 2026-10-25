@@ -67,15 +67,12 @@ class _TransactionLogViewState extends State<TransactionLogView> {
             : IconButton(
                 onPressed: _confirmClear,
                 tooltip: "Очистить журнал",
-                icon: const Icon(Icons.delete_outline,
-                    color: ColorConstants.whiteColor),
+                icon: const Icon(Icons.delete_outline, color: ColorConstants.whiteColor),
               ),
       ),
       body: _logs.isEmpty
           ? Center(
-              child: Text("Нет ошибок",
-                  style: context.general.textTheme.titleLarge!
-                      .copyWith(fontWeight: FontWeight.bold)),
+              child: Text("Нет ошибок", style: context.general.textTheme.titleLarge!.copyWith(fontWeight: FontWeight.bold)),
             )
           : ListView.builder(
               padding: context.padding.normal,
@@ -99,29 +96,23 @@ class _TransactionLogViewState extends State<TransactionLogView> {
             Row(
               children: [
                 Container(
-                  padding:
-                      const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
                   decoration: BoxDecoration(
-                    color: Colors.red.withOpacity(0.15),
+                    color: Colors.red.withValues(alpha: 0.15),
                     borderRadius: BorderRadius.circular(6),
                   ),
-                  child: Text("HTTP $statusCode",
-                      style: context.general.textTheme.bodyMedium!.copyWith(
-                          fontWeight: FontWeight.bold, color: Colors.red)),
+                  child: Text("HTTP $statusCode", style: context.general.textTheme.bodyMedium!.copyWith(fontWeight: FontWeight.bold, color: Colors.red)),
                 ),
                 const SizedBox(width: 10),
                 Expanded(
-                  child: Text(timestamp,
-                      style: context.general.textTheme.bodySmall!
-                          .copyWith(color: ColorConstants.greyColor)),
+                  child: Text(timestamp, style: context.general.textTheme.bodySmall!.copyWith(color: ColorConstants.greyColor)),
                 ),
                 IconButton(
                   visualDensity: VisualDensity.compact,
                   tooltip: "Копировать",
                   icon: const Icon(Icons.copy, size: 18),
                   onPressed: () {
-                    Clipboard.setData(
-                        ClipboardData(text: _entryAsText(entry)));
+                    Clipboard.setData(ClipboardData(text: _entryAsText(entry)));
                     Get.snackbar(
                       'Скопировано',
                       'Запись скопирована в буфер обмена',
@@ -132,12 +123,9 @@ class _TransactionLogViewState extends State<TransactionLogView> {
               ],
             ),
             const SizedBox(height: 8),
-            _section(context, "Ответ сервера",
-                (entry['responseMessage'] ?? '').toString()),
-            _section(context, "Тело запроса",
-                _pretty.convert(entry['requestBody'] ?? {})),
-            _section(context, "Заголовки",
-                _pretty.convert(entry['requestHeaders'] ?? {})),
+            _section(context, "Ответ сервера", (entry['responseMessage'] ?? '').toString()),
+            _section(context, "Тело запроса", _pretty.convert(entry['requestBody'] ?? {})),
+            _section(context, "Заголовки", _pretty.convert(entry['requestHeaders'] ?? {})),
           ],
         ),
       ),
@@ -151,21 +139,16 @@ class _TransactionLogViewState extends State<TransactionLogView> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text(title,
-              style: context.general.textTheme.bodySmall!.copyWith(
-                  fontWeight: FontWeight.bold,
-                  color: ColorConstants.greyColor)),
+          Text(title, style: context.general.textTheme.bodySmall!.copyWith(fontWeight: FontWeight.bold, color: ColorConstants.greyColor)),
           const SizedBox(height: 2),
           Container(
             width: double.infinity,
             padding: const EdgeInsets.all(8),
             decoration: BoxDecoration(
-              color: Colors.black.withOpacity(0.04),
+              color: Colors.black.withValues(alpha: 0.04),
               borderRadius: BorderRadius.circular(6),
             ),
-            child: SelectableText(content,
-                style: const TextStyle(
-                    fontFamily: 'monospace', fontSize: 12)),
+            child: SelectableText(content, style: const TextStyle(fontFamily: 'monospace', fontSize: 12)),
           ),
         ],
       ),

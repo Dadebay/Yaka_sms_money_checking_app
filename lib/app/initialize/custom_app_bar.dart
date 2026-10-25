@@ -1,6 +1,5 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import 'package:flutter_iconly/flutter_iconly.dart';
 import 'package:get/get.dart';
 import 'package:kartal/kartal.dart';
 import 'package:sms_app/app/initialize/color_constants.dart';
@@ -35,7 +34,7 @@ class CustomAppBar extends StatelessWidget implements PreferredSizeWidget {
                 Navigator.of(context).pop();
               },
               icon: const Icon(
-                IconlyLight.arrowLeftCircle,
+                Icons.arrow_circle_left_outlined,
                 color: ColorConstants.whiteColor,
               ),
             )
