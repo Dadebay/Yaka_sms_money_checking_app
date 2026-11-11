@@ -15,7 +15,7 @@ class ReceiverApiException implements Exception {
 class PaymentApiService {
   PaymentApiService({http.Client? client}) : _client = client ?? http.Client();
 
-  static const _baseUrl = 'https://komekchi.brandsforlesstm.com/api';
+  static const _baseUrl = 'http://ucdayy.com.tm:8080/api';
   static const _timeout = Duration(seconds: 15);
   static const transactionHeaders = <String, String>{
     'Accept': 'application/json',
